@@ -1,197 +1,175 @@
 <!DOCTYPE html>
 <html>
 <head>
-<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
-<meta name="apple-mobile-web-app-capable" content="yes" />
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<title>WebAR Stable</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+
+<title>Stable WebAR Video</title>
 
 <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
 <style>
-html, body{
-  margin:0;
-  padding:0;
-  overflow:hidden;
-  width:100%;
-  height:100%;
-  background:transparent;
+html,body{
+margin:0;
+padding:0;
+overflow:hidden;
+width:100%;
+height:100%;
+background:black;
 }
 
 a-scene{
-  position:fixed !important;
-  top:0;
-  left:0;
-  width:100vw !important;
-  height:100vh !important;
-  background:transparent !important;
+position:fixed !important;
+top:0;
+left:0;
+width:100vw !important;
+height:100vh !important;
 }
 
-.instruction-container{
-  position:fixed;
-  bottom:30px;
-  width:100%;
-  text-align:center;
-  z-index:999;
-  pointer-events:none;
+#scanText{
+position:fixed;
+bottom:30px;
+width:100%;
+text-align:center;
+font-size:18px;
+color:#00eaff;
+font-family:sans-serif;
+z-index:999;
 }
 
-.instruction-text{
-  font-size:1rem;
-  color:#4facfe;
-  background:rgba(0,0,0,0.7);
-  padding:10px 20px;
-  border-radius:10px;
-  border:1px solid #4facfe;
-  display:inline-block;
-  text-transform:uppercase;
-}
-
-#unmute-btn{
-  position:fixed;
-  top:20px;
-  left:50%;
-  transform:translateX(-50%);
-  z-index:1000;
-  background:rgba(0,0,0,0.75);
-  color:#fff;
-  border:1px solid #fff;
-  border-radius:8px;
-  padding:8px 18px;
-  font-size:0.9rem;
-  cursor:pointer;
-  display:none;
+#unmuteBtn{
+position:fixed;
+top:20px;
+left:50%;
+transform:translateX(-50%);
+padding:10px 20px;
+border-radius:8px;
+border:1px solid white;
+background:rgba(0,0,0,0.7);
+color:white;
+font-size:14px;
+display:none;
+z-index:1000;
+cursor:pointer;
 }
 </style>
 </head>
 
 <body>
 
-<button id="unmute-btn">🔊 Tap to Unmute</button>
-
-<div class="instruction-container" id="instruction-container">
-  <div class="instruction-text">
-    Scan Amcet Logo
-  </div>
-</div>
+<div id="scanText">Scan Logo</div>
+<button id="unmuteBtn">Tap for Sound 🔊</button>
 
 <a-scene
-  mindar-image="
-    imageTargetSrc: ./targets.mind;
-    uiScanning: no;
-    uiLoading: no;
-    filterMinCF: 0.0005;
-    filterBeta: 0.005;
-    warmupTolerance: 5;
-    missTolerance: 5;
-  "
-  vr-mode-ui="enabled: false"
-  device-orientation-permission-ui="enabled: true"
-  renderer="colorManagement: true; alpha: true;"
-  color-space="sRGB">
+mindar-image="
+imageTargetSrc: ./targets.mind;
+uiScanning:no;
+uiLoading:no;
+"
+vr-mode-ui="enabled:false"
+device-orientation-permission-ui="enabled:true"
+renderer="alpha:true">
 
-  <a-assets>
-    <video id="ar-video"
-      src="./video.mp4"
-      preload="auto"
-      loop
-      muted
-      playsinline
-      webkit-playsinline
-      crossorigin="anonymous">
-    </video>
-  </a-assets>
+<a-assets>
+<video id="video"
+src="./video.mp4"
+loop
+muted
+playsinline
+webkit-playsinline
+crossorigin="anonymous">
+</video>
+</a-assets>
 
-  <a-camera position="0 0 0" look-controls="enabled:false"></a-camera>
+<a-camera position="0 0 0" look-controls="enabled:false"></a-camera>
 
-  <a-entity mindar-image-target="targetIndex: 0" id="target">
-    <a-video
-      src="#ar-video"
-      width="0.9"
-      height="0.9"
-      position="0 0 0">
-    </a-video>
-  </a-entity>
+<!-- image tracker -->
+<a-entity id="marker" mindar-image-target="targetIndex:0"></a-entity>
+
+<!-- screen fixed video -->
+<a-entity id="screenVideo" visible="false">
+<a-video
+src="#video"
+width="2.6"
+height="3.6"
+position="0 0 -2.5">
+</a-video>
+</a-entity>
 
 </a-scene>
 
 <script>
-const video = document.getElementById('ar-video');
-const target = document.getElementById('target');
-const instruction = document.getElementById('instruction-container');
-const unmuteBtn = document.getElementById('unmute-btn');
+const video=document.querySelector("#video");
+const marker=document.querySelector("#marker");
+const screenVideo=document.querySelector("#screenVideo");
+const scanText=document.querySelector("#scanText");
+const unmute=document.querySelector("#unmuteBtn");
 
-let visible=false;
-let audioUnlocked=false;
+let detected=false;
+let unlocked=false;
 
-video.muted=true;
-video.setAttribute('playsinline','');
-video.setAttribute('webkit-playsinline','');
+/* unlock audio */
+function unlock(){
+if(unlocked) return;
+unlocked=true;
 
-function unlockAudio(){
-  if(audioUnlocked) return;
-  audioUnlocked=true;
+try{
+const AudioContext=window.AudioContext||window.webkitAudioContext;
+const ctx=new AudioContext();
+ctx.resume();
+}catch(e){}
 
-  try{
-    const AudioContext=window.AudioContext||window.webkitAudioContext;
-    if(AudioContext){
-      const ctx=new AudioContext();
-      ctx.resume();
-    }
-  }catch(e){}
+video.muted=false;
 
-  video.muted=false;
+if(detected) video.play();
 
-  if(visible && video.paused){
-    video.play().catch(()=>{});
-  }
-
-  unmuteBtn.style.display="none";
+unmute.style.display="none";
 }
 
-document.addEventListener('click',unlockAudio);
-document.addEventListener('touchend',unlockAudio);
+document.addEventListener("click",unlock);
+document.addEventListener("touchend",unlock);
 
-target.addEventListener('targetFound',()=>{
-  visible=true;
-  instruction.style.display="none";
+/* when image found */
+marker.addEventListener("targetFound",()=>{
 
-  video.play().then(()=>{
-    if(!audioUnlocked){
-      unmuteBtn.style.display="block";
-    }
-  }).catch(()=>{
-    unmuteBtn.style.display="block";
-  });
+detected=true;
+scanText.style.display="none";
+screenVideo.setAttribute("visible",true);
+
+video.play().then(()=>{
+if(!unlocked) unmute.style.display="block";
 });
 
-target.addEventListener('targetLost',()=>{
-  visible=false;
-  instruction.style.display="block";
-  unmuteBtn.style.display="none";
-  video.pause();
 });
 
-window.addEventListener('load',()=>{
-  if(
-    typeof DeviceOrientationEvent!=='undefined' &&
-    typeof DeviceOrientationEvent.requestPermission==='function'
-  ){
-    const requestPerm=()=>{
-      DeviceOrientationEvent.requestPermission()
-      .then(res=>{
-        if(res==='granted'){
-          window.addEventListener('deviceorientation',()=>{});
-        }
-      })
-      .catch(console.error);
+/* when image lost */
+marker.addEventListener("targetLost",()=>{
 
-      document.removeEventListener('touchend',requestPerm);
-    };
+detected=false;
+scanText.style.display="block";
+screenVideo.setAttribute("visible",false);
+video.pause();
+unmute.style.display="none";
 
-    document.addEventListener('touchend',requestPerm);
-  }
+});
+
+/* iOS permission */
+window.addEventListener("load",()=>{
+if(typeof DeviceOrientationEvent!=="undefined" &&
+typeof DeviceOrientationEvent.requestPermission==="function"){
+
+const ask=()=>{
+DeviceOrientationEvent.requestPermission()
+.then(()=>{})
+.catch(()=>{});
+
+document.removeEventListener("touchend",ask);
+};
+
+document.addEventListener("touchend",ask);
+}
 });
 </script>
 
