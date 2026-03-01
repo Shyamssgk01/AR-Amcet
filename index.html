@@ -4,17 +4,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-<title>WebAR Transparent</title>
+<title>WebAR</title>
 
 <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.5/dist/mindar-image-aframe.prod.js"></script>
 
 <style>
-* {
-  margin: 0;
-  padding: 0;
-  box-sizing: border-box;
-}
+* { margin: 0; padding: 0; box-sizing: border-box; }
 
 html, body {
   width: 100%;
@@ -23,17 +19,32 @@ html, body {
   background: #000;
 }
 
-/* A-Frame scene fills screen as camera background */
-a-scene {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  z-index: 0 !important;
+/* Layer 1 (bottom): live camera feed */
+#camera-bg {
+  position: fixed;
+  top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  z-index: 1;
 }
 
-/* Stable video overlay — fixed center of screen, above camera */
+/* Layer 2: MindAR canvas — transparent, only used for detection */
+a-scene {
+  position: fixed !important;
+  top: 0 !important; left: 0 !important;
+  width: 100vw !important;
+  height: 100vh !important;
+  z-index: 2 !important;
+  background: transparent !important;
+  pointer-events: none;
+}
+
+/* Force the A-Frame/Three.js canvas to be transparent */
+a-scene canvas {
+  background: transparent !important;
+}
+
+/* Layer 3 (top): stable video overlay */
 #video-overlay {
   position: fixed;
   top: 50%;
@@ -46,7 +57,7 @@ a-scene {
   display: none;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
 }
 
 #video-overlay video {
@@ -56,7 +67,6 @@ a-scene {
   display: block;
 }
 
-/* Instruction text */
 .instruction-container {
   position: fixed;
   bottom: 30px;
@@ -69,7 +79,7 @@ a-scene {
 .instruction-text {
   font-size: 1rem;
   color: #4facfe;
-  background: rgba(0, 0, 0, 0.7);
+  background: rgba(0,0,0,0.7);
   padding: 10px 20px;
   border-radius: 10px;
   border: 1px solid #4facfe;
@@ -77,14 +87,13 @@ a-scene {
   text-transform: uppercase;
 }
 
-/* Unmute button */
 #unmute-btn {
   position: fixed;
   top: 20px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 20;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(0,0,0,0.75);
   color: #fff;
   border: 1px solid #fff;
   border-radius: 8px;
@@ -98,9 +107,12 @@ a-scene {
 
 <body>
 
+<!-- Layer 1: Real camera feed as background -->
+<video id="camera-bg" autoplay playsinline muted></video>
+
 <button id="unmute-btn">🔊 Tap to Unmute</button>
 
-<!-- Stable video overlay — fixed on screen, NOT AR-tracked -->
+<!-- Layer 3: Stable video overlay -->
 <div id="video-overlay">
   <video id="ar-video"
     src="./video.mp4"
@@ -116,12 +128,7 @@ a-scene {
   <div class="instruction-text">Scan Amcet Logo</div>
 </div>
 
-<!--
-  A-Frame scene:
-  - Renders the live camera feed as background
-  - Detects the image target
-  - No 3D video rendered here at all
--->
+<!-- Layer 2: MindAR — transparent canvas, detection only -->
 <a-scene
   mindar-image="imageTargetSrc: ./targets.mind; uiScanning: no; uiLoading: no;"
   vr-mode-ui="enabled: false"
@@ -131,7 +138,6 @@ a-scene {
 
   <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-  <!-- Detection only — invisible box, no video in AR space -->
   <a-entity mindar-image-target="targetIndex: 0" id="target">
     <a-box visible="false" width="0.001" height="0.001" depth="0.001"></a-box>
   </a-entity>
@@ -139,7 +145,8 @@ a-scene {
 </a-scene>
 
 <script>
-const video = document.getElementById('ar-video');
+const arVideo = document.getElementById('ar-video');
+const cameraBg = document.getElementById('camera-bg');
 const overlay = document.getElementById('video-overlay');
 const target = document.getElementById('target');
 const instruction = document.getElementById('instruction-container');
@@ -148,11 +155,49 @@ const unmuteBtn = document.getElementById('unmute-btn');
 let visible = false;
 let audioUnlocked = false;
 
-video.muted = true;
-video.setAttribute('playsinline', '');
-video.setAttribute('webkit-playsinline', '');
+arVideo.muted = true;
+arVideo.setAttribute('playsinline', '');
+arVideo.setAttribute('webkit-playsinline', '');
 
-// ---- Audio unlock (required for iOS) ----
+// ---- Step 1: Start real camera feed for background ----
+async function startCamera() {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' }, // back camera
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+    cameraBg.srcObject = stream;
+  } catch (err) {
+    console.warn('Camera access failed:', err);
+  }
+}
+
+startCamera();
+
+// ---- Step 2: Make A-Frame canvas transparent after scene loads ----
+document.querySelector('a-scene').addEventListener('loaded', () => {
+  setTimeout(() => {
+    const sceneEl = document.querySelector('a-scene');
+    // Hide MindAR's own internal camera video (we use our own #camera-bg)
+    const mindARVideos = sceneEl.querySelectorAll('video');
+    mindARVideos.forEach(v => {
+      if (v.id !== 'ar-video') {
+        v.style.display = 'none';
+      }
+    });
+    // Make WebGL canvas transparent
+    const canvas = sceneEl.querySelector('canvas');
+    if (canvas) {
+      canvas.style.background = 'transparent';
+    }
+  }, 500);
+});
+
+// ---- Audio unlock ----
 function unlockAudio() {
   if (audioUnlocked) return;
   audioUnlocked = true;
@@ -165,44 +210,40 @@ function unlockAudio() {
     }
   } catch (e) {}
 
-  video.muted = false;
-
-  if (visible && video.paused) {
-    video.play().catch(() => {});
+  arVideo.muted = false;
+  if (visible && arVideo.paused) {
+    arVideo.play().catch(() => {});
   }
-
   unmuteBtn.style.display = 'none';
 }
 
 document.addEventListener('click', unlockAudio);
 document.addEventListener('touchend', unlockAudio);
 
-// ---- Image detected: show stable overlay ----
+// ---- Target detected ----
 target.addEventListener('targetFound', () => {
   visible = true;
   instruction.style.display = 'none';
   overlay.style.display = 'block';
 
-  video.play().then(() => {
-    if (!audioUnlocked) {
-      unmuteBtn.style.display = 'block';
-    }
+  arVideo.play().then(() => {
+    if (!audioUnlocked) unmuteBtn.style.display = 'block';
   }).catch(() => {
     unmuteBtn.style.display = 'block';
   });
 });
 
-// ---- Image lost: hide overlay ----
+// ---- Target lost ----
 target.addEventListener('targetLost', () => {
   visible = false;
   instruction.style.display = 'block';
   unmuteBtn.style.display = 'none';
   overlay.style.display = 'none';
-  video.pause();
-  video.currentTime = 0;
+  arVideo.pause();
+  arVideo.currentTime = 0;
 });
 
-// ---- iOS 13+: request DeviceOrientation permission on first touch ----
+// ---- iOS 13+ DeviceOrientation permission ----
 window.addEventListener('load', () => {
   if (
     typeof DeviceOrientationEvent !== 'undefined' &&
