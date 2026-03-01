@@ -2,6 +2,8 @@
 <html>
 <head>
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <title>WebAR Transparent</title>
 
 <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
@@ -45,10 +47,28 @@ a-scene {
   display: inline-block;
   text-transform: uppercase;
 }
+
+#unmute-btn {
+  position: fixed;
+  top: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 1000;
+  background: rgba(0,0,0,0.75);
+  color: #fff;
+  border: 1px solid #fff;
+  border-radius: 8px;
+  padding: 8px 18px;
+  font-size: 0.9rem;
+  cursor: pointer;
+  display: none;
+}
 </style>
 </head>
 
 <body>
+
+<button id="unmute-btn">🔊 Tap to Unmute</button>
 
 <div class="instruction-container" id="instruction-container">
   <div class="instruction-text">
@@ -59,7 +79,7 @@ a-scene {
 <a-scene
   mindar-image="imageTargetSrc: ./targets.mind; uiScanning: no; uiLoading: no;"
   vr-mode-ui="enabled: false"
-  device-orientation-permission-ui="enabled: false"
+  device-orientation-permission-ui="enabled: true"
   renderer="colorManagement: true; alpha: true;"
   color-space="sRGB">
 
@@ -68,6 +88,7 @@ a-scene {
       src="./video.mp4"
       preload="auto"
       loop
+      muted
       playsinline
       webkit-playsinline
       crossorigin="anonymous">
@@ -91,39 +112,81 @@ a-scene {
 const video = document.getElementById('ar-video');
 const target = document.getElementById('target');
 const instruction = document.getElementById('instruction-container');
+const unmuteBtn = document.getElementById('unmute-btn');
 
 let visible = false;
+let audioUnlocked = false;
 
-// Mobile autoplay fix
 video.muted = true;
-video.setAttribute("playsinline", "");
-video.setAttribute("webkit-playsinline", "");
+video.setAttribute('playsinline', '');
+video.setAttribute('webkit-playsinline', '');
 
-// When image detected
+function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+
+  // Resume AudioContext — required by iOS to allow audio playback
+  try {
+    const AudioContext = window.AudioContext || window.webkitAudioContext;
+    if (AudioContext) {
+      const ctx = new AudioContext();
+      ctx.resume();
+    }
+  } catch (e) {}
+
+  video.muted = false;
+
+  if (visible && video.paused) {
+    video.play().catch(() => {});
+  }
+
+  unmuteBtn.style.display = 'none';
+}
+
+// Use both click and touchend to cover iOS Safari and Android Chrome
+document.addEventListener('click', unlockAudio);
+document.addEventListener('touchend', unlockAudio);
+
 target.addEventListener('targetFound', () => {
   visible = true;
-  instruction.style.display = "none";
-  video.play().catch(() => {});
+  instruction.style.display = 'none';
+
+  video.play().then(() => {
+    if (!audioUnlocked) {
+      unmuteBtn.style.display = 'block';
+    }
+  }).catch(() => {
+    unmuteBtn.style.display = 'block';
+  });
 });
 
-// When image lost
 target.addEventListener('targetLost', () => {
   visible = false;
-  instruction.style.display = "block";
+  instruction.style.display = 'block';
+  unmuteBtn.style.display = 'none';
   video.pause();
 });
 
-// Unlock audio after tap
-document.addEventListener("click", () => {
-  if (visible) {
-    video.muted = false;
-    video.play().catch(() => {});
+// iOS 13+ requires explicit DeviceOrientation permission via user gesture
+window.addEventListener('load', () => {
+  if (
+    typeof DeviceOrientationEvent !== 'undefined' &&
+    typeof DeviceOrientationEvent.requestPermission === 'function'
+  ) {
+    const requestPerm = () => {
+      DeviceOrientationEvent.requestPermission()
+        .then(res => {
+          if (res === 'granted') {
+            window.addEventListener('deviceorientation', () => {});
+          }
+        })
+        .catch(console.error);
+      document.removeEventListener('touchend', requestPerm);
+    };
+    document.addEventListener('touchend', requestPerm);
   }
 });
 </script>
 
 </body>
 </html>
-
-
-
