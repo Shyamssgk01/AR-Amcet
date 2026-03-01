@@ -16,16 +16,40 @@ html, body {
   overflow: hidden;
   width: 100%;
   height: 100%;
-  background: transparent;
+  background: #000;
 }
 
-a-scene {
-  position: fixed !important;
+/* Camera feed fills the background */
+#camera-feed {
+  position: fixed;
   top: 0;
   left: 0;
-  width: 100vw !important;
-  height: 100vh !important;
-  background: transparent !important;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  z-index: 0;
+}
+
+/* Stable video overlay — fixed on screen, not AR-tracked */
+#video-overlay {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 90vw;
+  max-width: 480px;
+  aspect-ratio: 16/9;
+  z-index: 10;
+  display: none;
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: 0 0 30px rgba(0,0,0,0.6);
+}
+
+#video-overlay video {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
 }
 
 .instruction-container {
@@ -63,6 +87,17 @@ a-scene {
   cursor: pointer;
   display: none;
 }
+
+/* Hide the a-scene canvas — we only use MindAR for detection */
+a-scene {
+  position: fixed !important;
+  top: 0; left: 0;
+  width: 1px !important;
+  height: 1px !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  z-index: -1 !important;
+}
 </style>
 </head>
 
@@ -70,12 +105,23 @@ a-scene {
 
 <button id="unmute-btn">🔊 Tap to Unmute</button>
 
-<div class="instruction-container" id="instruction-container">
-  <div class="instruction-text">
-    Scan Amcet Logo
-  </div>
+<!-- Stable video overlay shown on screen when target detected -->
+<div id="video-overlay">
+  <video id="ar-video"
+    src="./video.mp4"
+    preload="auto"
+    loop
+    muted
+    playsinline
+    webkit-playsinline>
+  </video>
 </div>
 
+<div class="instruction-container" id="instruction-container">
+  <div class="instruction-text">Scan Amcet Logo</div>
+</div>
+
+<!-- MindAR scene (invisible) — used only for image detection -->
 <a-scene
   mindar-image="imageTargetSrc: ./targets.mind; uiScanning: no; uiLoading: no;"
   vr-mode-ui="enabled: false"
@@ -84,32 +130,22 @@ a-scene {
   color-space="sRGB">
 
   <a-assets>
-    <video id="ar-video"
-      src="./video.mp4"
-      preload="auto"
-      loop
-      muted
-      playsinline
-      webkit-playsinline
-      crossorigin="anonymous">
-    </video>
+    <!-- Dummy asset so MindAR initializes properly -->
+    <img id="dummy" src="data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=" />
   </a-assets>
 
   <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
+  <!-- We only use this entity for detection events, no video rendered here -->
   <a-entity mindar-image-target="targetIndex: 0" id="target">
-    <a-video
-      src="#ar-video"
-      width="1"
-      height="1"
-      position="0 0 0">
-    </a-video>
+    <a-box visible="false" width="0.001" height="0.001" depth="0.001"></a-box>
   </a-entity>
 
 </a-scene>
 
 <script>
 const video = document.getElementById('ar-video');
+const overlay = document.getElementById('video-overlay');
 const target = document.getElementById('target');
 const instruction = document.getElementById('instruction-container');
 const unmuteBtn = document.getElementById('unmute-btn');
@@ -121,11 +157,11 @@ video.muted = true;
 video.setAttribute('playsinline', '');
 video.setAttribute('webkit-playsinline', '');
 
+// ---- Audio unlock ----
 function unlockAudio() {
   if (audioUnlocked) return;
   audioUnlocked = true;
 
-  // Resume AudioContext — required by iOS to allow audio playback
   try {
     const AudioContext = window.AudioContext || window.webkitAudioContext;
     if (AudioContext) {
@@ -143,13 +179,16 @@ function unlockAudio() {
   unmuteBtn.style.display = 'none';
 }
 
-// Use both click and touchend to cover iOS Safari and Android Chrome
 document.addEventListener('click', unlockAudio);
 document.addEventListener('touchend', unlockAudio);
 
+// ---- Target detection: show/hide stable overlay ----
 target.addEventListener('targetFound', () => {
   visible = true;
   instruction.style.display = 'none';
+
+  // Show the fixed video overlay on screen
+  overlay.style.display = 'block';
 
   video.play().then(() => {
     if (!audioUnlocked) {
@@ -164,10 +203,14 @@ target.addEventListener('targetLost', () => {
   visible = false;
   instruction.style.display = 'block';
   unmuteBtn.style.display = 'none';
+
+  // Hide video when image is lost
+  overlay.style.display = 'none';
   video.pause();
+  video.currentTime = 0;
 });
 
-// iOS 13+ requires explicit DeviceOrientation permission via user gesture
+// ---- iOS 13+ DeviceOrientation permission ----
 window.addEventListener('load', () => {
   if (
     typeof DeviceOrientationEvent !== 'undefined' &&
